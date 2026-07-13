@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+.env
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+.DS_Store
+Thumbs.db
