@@ -14,9 +14,8 @@ vi.mock('@opentelemetry/sdk-node', () => ({
   NodeSDK: nodeSdkCtor
 }));
 
-const { isTelemetryEnabled, setupTelemetry, recordError, recordRedirect, recordRequest } = await import(
-  '../../src/infrastructure/telemetry.js'
-);
+const { isTelemetryEnabled, setupTelemetry, recordError, recordRedirect, recordRequest, processMemoryRssBytes } =
+  await import('../../src/infrastructure/telemetry.js');
 
 describe('isTelemetryEnabled', () => {
   it('is false when the endpoint is missing, empty or blank', () => {
@@ -68,5 +67,11 @@ describe('metric recorders', () => {
     expect(() => recordRequest({ route: '/health', status: 200, durationSeconds: 0.01 })).not.toThrow();
     expect(() => recordRedirect('ABCDEF')).not.toThrow();
     expect(() => recordError('error-burst')).not.toThrow();
+  });
+});
+
+describe('processMemoryRssBytes', () => {
+  it('is registered as an observable gauge instrument', () => {
+    expect(processMemoryRssBytes).toBeDefined();
   });
 });

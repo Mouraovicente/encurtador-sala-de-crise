@@ -91,6 +91,16 @@ export const errorsTotal = meter.createCounter('shortener_errors_total', {
   description: 'Total number of errors triggered by an active chaos scenario'
 });
 
+// Powers the "memoria do processo" panel and makes memory-leak scenarios
+// directly observable in Grafana/Prometheus.
+export const processMemoryRssBytes = meter.createObservableGauge('process_memory_rss_bytes', {
+  description: "Resident set size (RSS) of the Node.js process, in bytes",
+  unit: 'By'
+});
+processMemoryRssBytes.addCallback((result) => {
+  result.observe(process.memoryUsage().rss);
+});
+
 export function recordRequest(attributes: { route: string; status: number; durationSeconds: number }): void {
   requestsTotal.add(1, { route: attributes.route, status: String(attributes.status) });
   requestDurationSeconds.record(attributes.durationSeconds, { route: attributes.route });
