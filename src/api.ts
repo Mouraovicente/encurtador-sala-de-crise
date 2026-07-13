@@ -5,6 +5,7 @@ import type { LinkRepo } from './application/ports.js';
 import { InvalidUrlError, CollisionError, type RandomIntFn } from './domain/shortener.js';
 import { ChaosRegistry, isChaosScenario } from './domain/chaos.js';
 import { ChaosEffects } from './infrastructure/chaos-effects.js';
+import { recordError, recordRedirect, recordRequest } from './infrastructure/telemetry.js';
 
 export interface BuildAppOptions {
   linkRepo: LinkRepo;
@@ -36,6 +37,7 @@ function baseUrlFor(request: { protocol: string; hostname: string }, configured?
 function createChaosPreHandler(effects: ChaosEffects, options: { applyLatency: boolean }) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     if (!effects.tryAcquireConnection()) {
+      recordError('connection-leak');
       return reply.code(503).send({ error: 'connection pool exhausted', scenario: 'connection-leak' });
     }
 
@@ -46,6 +48,7 @@ function createChaosPreHandler(effects: ChaosEffects, options: { applyLatency: b
     }
 
     if (effects.shouldTriggerErrorBurst()) {
+      recordError('error-burst');
       return reply.code(500).send({ error: 'internal error', scenario: 'error-burst' });
     }
 
@@ -61,6 +64,16 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   const businessPreHandler = createChaosPreHandler(chaosEffects, { applyLatency: false });
   const redirectPreHandler = createChaosPreHandler(chaosEffects, { applyLatency: true });
+
+  // Route pattern (e.g. '/:code'), not the raw URL, keeps the metric's label
+  // cardinality bounded regardless of how many distinct short codes exist.
+  app.addHook('onResponse', async (request, reply) => {
+    recordRequest({
+      route: request.routeOptions.url ?? request.url,
+      status: reply.statusCode,
+      durationSeconds: reply.elapsedTime / 1000
+    });
+  });
 
   app.get('/health', async () => ({ status: 'ok' }));
 
@@ -118,6 +131,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   app.get<{ Params: { code: string } }>('/:code', { preHandler: redirectPreHandler }, async (request, reply) => {
     try {
       const link = resolveLink(linkRepo, request.params.code);
+      recordRedirect(link.code);
       return reply.code(302).redirect(link.url);
     } catch (err) {
       if (err instanceof LinkNotFoundError) {
