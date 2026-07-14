@@ -1,0 +1,88 @@
+{
+  "id": null,
+  "uid": "sala-de-crise",
+  "title": "Sala de Crise - Encurtador de URLs",
+  "description": "Req rate, p95 de latencia, taxa de erro e memoria do processo do encurtador-sala-de-crise.",
+  "tags": ["sala-de-crise", "aiops"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate (req/s por rota)",
+      "description": "sum(rate(shortener_requests_total[1m])) by (route)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum(rate(shortener_requests_total[1m])) by (route)",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "p95 de latencia (GET /:code e demais rotas)",
+      "description": "histogram_quantile(0.95, sum(rate(shortener_request_duration_seconds_bucket[5m])) by (le, route))",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(shortener_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate (5xx / total e erros por cenario de caos)",
+      "description": "sum(rate(shortener_requests_total{status=~\"5..\"}[1m])) / sum(rate(shortener_requests_total[1m])) e sum(rate(shortener_errors_total[1m])) by (scenario)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum(rate(shortener_requests_total{status=~\"5..\"}[1m])) / sum(rate(shortener_requests_total[1m]))",
+          "legendFormat": "http 5xx ratio",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum(rate(shortener_errors_total[1m])) by (scenario)",
+          "legendFormat": "chaos: {{scenario}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Memoria do processo (RSS)",
+      "description": "process_memory_rss_bytes - cresce continuamente durante o cenario memory-leak",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "process_memory_rss_bytes",
+          "legendFormat": "RSS",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    }
+  ]
+}

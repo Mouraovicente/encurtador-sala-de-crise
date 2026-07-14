@@ -1,0 +1,46 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: sala-de-crise-otel-collector
+    command: ['--config=/etc/otel-collector.yaml']
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - '4318:4318' # OTLP/HTTP (used by the app: OTEL_EXPORTER_OTLP_ENDPOINT)
+      - '4317:4317' # OTLP/gRPC (unused by the app, exposed for other tools)
+      - '8889:8889' # Prometheus exporter (scraped by the prometheus service)
+    networks:
+      - observability
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: sala-de-crise-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+    depends_on:
+      - otel-collector
+    networks:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: sala-de-crise-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - observability
+
+networks:
+  observability:
+    driver: bridge
