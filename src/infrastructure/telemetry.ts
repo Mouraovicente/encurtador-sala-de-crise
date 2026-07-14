@@ -1,4 +1,4 @@
-import { metrics } from '@opentelemetry/api';
+import { metrics, type Counter, type Histogram, type ObservableGauge } from '@opentelemetry/api';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
@@ -32,6 +32,64 @@ export function isTelemetryEnabled(endpoint: string | undefined): boolean {
   return Boolean(endpoint && endpoint.trim().length > 0);
 }
 
+interface Instruments {
+  redirectsTotal: Counter;
+  requestsTotal: Counter;
+  requestDurationSeconds: Histogram;
+  errorsTotal: Counter;
+  processMemoryRssBytes: ObservableGauge;
+}
+
+// IMPORTANT: @opentelemetry/api's metrics.getMeter() has no proxy/delegation
+// layer (unlike the tracer API). A meter/instrument obtained before the real
+// MeterProvider is registered is permanently bound to the no-op provider,
+// even after NodeSDK.start() runs later. So instruments must never be
+// created eagerly at module load time -- only lazily, on first use, which in
+// a real run always happens after setupTelemetry() has already decided
+// whether to register a real SDK (server.ts calls it before building the
+// app / handling any request).
+let instruments: Instruments | undefined;
+
+function createInstruments(): Instruments {
+  const meter = metrics.getMeter(METER_NAME);
+
+  const redirectsTotal = meter.createCounter('shortener_redirects_total', {
+    description: 'Total number of redirects served, per short code'
+  });
+
+  const requestsTotal = meter.createCounter('shortener_requests_total', {
+    description: 'Total number of HTTP requests, per route and status code'
+  });
+
+  const requestDurationSeconds = meter.createHistogram('shortener_request_duration_seconds', {
+    description: 'HTTP request duration in seconds',
+    unit: 's'
+  });
+
+  const errorsTotal = meter.createCounter('shortener_errors_total', {
+    description: 'Total number of errors triggered by an active chaos scenario'
+  });
+
+  // Powers the "memoria do processo" panel and makes memory-leak scenarios
+  // directly observable in Grafana/Prometheus.
+  const processMemoryRssBytes = meter.createObservableGauge('process_memory_rss_bytes', {
+    description: 'Resident set size (RSS) of the Node.js process, in bytes',
+    unit: 'By'
+  });
+  processMemoryRssBytes.addCallback((result) => {
+    result.observe(process.memoryUsage().rss);
+  });
+
+  return { redirectsTotal, requestsTotal, requestDurationSeconds, errorsTotal, processMemoryRssBytes };
+}
+
+function getInstruments(): Instruments {
+  if (!instruments) {
+    instruments = createInstruments();
+  }
+  return instruments;
+}
+
 /**
  * Starts the OpenTelemetry SDK (traces + metrics over OTLP/HTTP) when an
  * endpoint is configured. If it is absent, or if starting the SDK fails for
@@ -45,6 +103,7 @@ export function setupTelemetry(options: TelemetryOptions = {}): TelemetryHandle 
   const serviceName = options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME;
 
   if (!isTelemetryEnabled(endpoint)) {
+    getInstruments();
     return NOOP_TELEMETRY;
   }
 
@@ -58,58 +117,35 @@ export function setupTelemetry(options: TelemetryOptions = {}): TelemetryHandle 
       })
     });
     sdk.start();
+    // Re-create instruments now that the real MeterProvider is registered,
+    // so they actually export instead of silently staying no-op.
+    instruments = createInstruments();
     return {
       enabled: true,
       shutdown: () => sdk.shutdown()
     };
   } catch (err) {
     console.error('[telemetry] failed to start OpenTelemetry SDK, continuing without export:', err);
+    getInstruments();
     return NOOP_TELEMETRY;
   }
 }
 
-// Instruments are created eagerly against the OpenTelemetry API's global
-// meter provider. Before setupTelemetry() registers a real provider, the API
-// package transparently returns a no-op meter, so these calls are always
-// safe to make (see the "metric recorders never throw" test).
-const meter = metrics.getMeter(METER_NAME);
-
-export const redirectsTotal = meter.createCounter('shortener_redirects_total', {
-  description: 'Total number of redirects served, per short code'
-});
-
-export const requestsTotal = meter.createCounter('shortener_requests_total', {
-  description: 'Total number of HTTP requests, per route and status code'
-});
-
-export const requestDurationSeconds = meter.createHistogram('shortener_request_duration_seconds', {
-  description: 'HTTP request duration in seconds',
-  unit: 's'
-});
-
-export const errorsTotal = meter.createCounter('shortener_errors_total', {
-  description: 'Total number of errors triggered by an active chaos scenario'
-});
-
-// Powers the "memoria do processo" panel and makes memory-leak scenarios
-// directly observable in Grafana/Prometheus.
-export const processMemoryRssBytes = meter.createObservableGauge('process_memory_rss_bytes', {
-  description: "Resident set size (RSS) of the Node.js process, in bytes",
-  unit: 'By'
-});
-processMemoryRssBytes.addCallback((result) => {
-  result.observe(process.memoryUsage().rss);
-});
-
 export function recordRequest(attributes: { route: string; status: number; durationSeconds: number }): void {
+  const { requestsTotal, requestDurationSeconds } = getInstruments();
   requestsTotal.add(1, { route: attributes.route, status: String(attributes.status) });
   requestDurationSeconds.record(attributes.durationSeconds, { route: attributes.route });
 }
 
 export function recordRedirect(code: string): void {
-  redirectsTotal.add(1, { code });
+  getInstruments().redirectsTotal.add(1, { code });
 }
 
 export function recordError(scenario: string): void {
-  errorsTotal.add(1, { scenario });
+  getInstruments().errorsTotal.add(1, { scenario });
+}
+
+/** Exposed for tests only, to confirm the observable gauge instrument gets created. */
+export function getProcessMemoryGauge(): ObservableGauge {
+  return getInstruments().processMemoryRssBytes;
 }

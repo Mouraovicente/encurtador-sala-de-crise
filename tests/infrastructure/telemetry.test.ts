@@ -1,3 +1,4 @@
+import { metrics } from '@opentelemetry/api';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const startMock = vi.fn();
@@ -14,7 +15,7 @@ vi.mock('@opentelemetry/sdk-node', () => ({
   NodeSDK: nodeSdkCtor
 }));
 
-const { isTelemetryEnabled, setupTelemetry, recordError, recordRedirect, recordRequest, processMemoryRssBytes } =
+const { isTelemetryEnabled, setupTelemetry, recordError, recordRedirect, recordRequest, getProcessMemoryGauge } =
   await import('../../src/infrastructure/telemetry.js');
 
 describe('isTelemetryEnabled', () => {
@@ -60,6 +61,19 @@ describe('setupTelemetry', () => {
     expect(telemetry.enabled).toBe(false);
     await expect(telemetry.shutdown()).resolves.toBeUndefined();
   });
+
+  it('creates metric instruments only after the SDK has started, so they bind to the real provider', () => {
+    // @opentelemetry/api's metrics.getMeter() has no delegation/proxy: a
+    // meter/instrument obtained before the real MeterProvider is registered
+    // stays a no-op forever. Instruments must therefore be (re)created after
+    // sdk.start(), never eagerly at module load time.
+    const getMeterSpy = vi.spyOn(metrics, 'getMeter');
+    setupTelemetry({ endpoint: 'http://localhost:4318' });
+    const startOrder = startMock.mock.invocationCallOrder[0] as number;
+    const getMeterOrders = getMeterSpy.mock.invocationCallOrder;
+    expect(getMeterOrders.some((order) => order > startOrder)).toBe(true);
+    getMeterSpy.mockRestore();
+  });
 });
 
 describe('metric recorders', () => {
@@ -70,8 +84,8 @@ describe('metric recorders', () => {
   });
 });
 
-describe('processMemoryRssBytes', () => {
-  it('is registered as an observable gauge instrument', () => {
-    expect(processMemoryRssBytes).toBeDefined();
+describe('getProcessMemoryGauge', () => {
+  it('returns the registered observable gauge instrument', () => {
+    expect(getProcessMemoryGauge()).toBeDefined();
   });
 });
