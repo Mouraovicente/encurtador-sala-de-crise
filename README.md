@@ -22,7 +22,7 @@ tudo isso rodando localmente, sem depender de nenhum serviço externo pago.
 | `tests/` | Testes de domínio, aplicação, infraestrutura e API (via `fastify.inject`, sem porta real) | Vitest |
 | `.github/workflows/ci.yml` | Pipeline de CI (Node 22: typecheck + testes) | GitHub Actions |
 
-**Stack principal:** TypeScript (`strict`, ESM, Node ≥ 20), Fastify,
+**Stack principal:** TypeScript (`strict`, ESM, Node ≥ 22), Fastify,
 `better-sqlite3`, OpenTelemetry (`sdk-node`, métricas + traces via OTLP/HTTP,
 com *no-op* gracioso se o collector não estiver de pé), Docker Compose e
 Vitest.
@@ -51,7 +51,7 @@ zero crash.
 
 ## Como rodar
 
-Pré-requisitos: Node.js ≥ 20 e, opcionalmente, Docker + Docker Compose para a
+Pré-requisitos: Node.js ≥ 22 e, opcionalmente, Docker + Docker Compose para a
 stack de observabilidade.
 
 ```bash
